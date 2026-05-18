@@ -39,7 +39,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = 'Could not connect to Pi server.\nMake sure pi_server.py is running on localhost:8000.';
+        _error = 'Could not connect to Pi server.\nMake sure bluetooth is connected or fastapi is running.';
         _loading = false;
       });
     }
