@@ -79,7 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: const Icon(Icons.show_chart, color: Colors.black, size: 16),
           ),
           const SizedBox(width: 12),
-          const Text('PI TRACKER', style: TextStyle(
+          const Text('Tech Neck', style: TextStyle(
             fontSize: 15, fontWeight: FontWeight.w700,
             color: AppTheme.textPrimary, letterSpacing: 2,
           )),
