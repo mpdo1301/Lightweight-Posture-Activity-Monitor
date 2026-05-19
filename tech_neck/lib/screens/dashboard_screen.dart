@@ -35,6 +35,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (kIsWeb) {
       _loadWebData();
     } else {
+      _summary = ActivitySummary(steps: 0, standingMinutes: 0, postureGoalPercentage: 0);
       _loading = false;
       _locationService.start();
       _locationService.locationStream.listen((point) {
@@ -112,7 +113,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: const Icon(Icons.show_chart, color: Colors.black, size: 16),
         ),
         const SizedBox(width: 12),
-        const Text('PI TRACKER', style: TextStyle(
+        const Text('Tech Neck', style: TextStyle(
           fontSize: 15, fontWeight: FontWeight.w700,
           color: AppTheme.textPrimary, letterSpacing: 2,
         )),
