@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
+import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/posture_chart.dart';
@@ -15,18 +17,45 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   ActivitySummary? _summary;
-  List<GpsPoint> _route = [];
+  List<GpsPoint> _httpRoute = [];
   bool _loading = true;
   String? _error;
+
+  final LocationService _locationService = LocationService();
+  final List<LocationPoint> _livePoints = [];
+
+  // Hardcoded fallback for mobile while BLE activity isn't wired yet
+  static final _mobileMockSummary = ActivitySummary(
+    steps: 8432,
+    standingMinutes: 214,
+    postureGoalPercentage: 68.5,
+  );
 
   @override
   void initState() {
     super.initState();
-    _loadAll();
+    _loadSummary();
+
+    if (!kIsWeb) {
+      _locationService.start();
+      _locationService.stream.listen((point) {
+        setState(() => _livePoints.add(point));
+      });
+    }
   }
 
-  Future<void> _loadAll() async {
+  Future<void> _loadSummary() async {
     setState(() { _loading = true; _error = null; });
+
+    if (!kIsWeb) {
+      // Mobile: use hardcoded data until BLE activity characteristic is wired up
+      setState(() {
+        _summary = _mobileMockSummary;
+        _loading = false;
+      });
+      return;
+    }
+
     try {
       final results = await Future.wait([
         ApiService.getActivitySummary(),
@@ -34,33 +63,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ]);
       setState(() {
         _summary = results[0] as ActivitySummary;
-        _route = results[1] as List<GpsPoint>;
+        _httpRoute = results[1] as List<GpsPoint>;
         _loading = false;
       });
     } catch (e) {
       setState(() {
-        _error = 'Could not connect to Pi server.\nMake sure bluetooth is connected or fastapi is running.';
+        _error = 'Could not connect to Pi server.\nMake sure pi_server.py is running on localhost:8000.';
         _loading = false;
       });
     }
   }
 
   @override
+  void dispose() {
+    _locationService.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.bg,
-      body: Column(
-        children: [
-          _buildHeader(),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
-                : _error != null
-                    ? _buildError()
-                    : _buildDashboard(),
-          ),
-        ],
-      ),
+      body: Column(children: [
+        _buildHeader(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+              : _error != null
+                  ? _buildError()
+                  : _buildDashboard(),
+        ),
+      ]),
     );
   }
 
@@ -71,27 +104,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         color: AppTheme.surface,
         border: Border(bottom: BorderSide(color: AppTheme.border)),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 28, height: 28,
-            decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(6)),
-            child: const Icon(Icons.show_chart, color: Colors.black, size: 16),
-          ),
-          const SizedBox(width: 12),
-          const Text('Tech Neck', style: TextStyle(
-            fontSize: 15, fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary, letterSpacing: 2,
-          )),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            color: AppTheme.textSecondary,
-            tooltip: 'Refresh',
-            onPressed: _loadAll,
-          ),
-        ],
-      ),
+      child: Row(children: [
+        Container(
+          width: 28, height: 28,
+          decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(6)),
+          child: const Icon(Icons.show_chart, color: Colors.black, size: 16),
+        ),
+        const SizedBox(width: 12),
+        const Text('PI TRACKER', style: TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w700,
+          color: AppTheme.textPrimary, letterSpacing: 2,
+        )),
+        const Spacer(),
+        if (!kIsWeb && _livePoints.isNotEmpty)
+          _GpsSourceIndicator(_livePoints.last.source),
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          color: AppTheme.textSecondary,
+          tooltip: 'Refresh',
+          onPressed: _loadSummary,
+        ),
+      ]),
     );
   }
 
@@ -106,26 +139,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppTheme.accentRed.withOpacity(0.4)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.wifi_off_rounded, color: AppTheme.accentRed, size: 40),
-            const SizedBox(height: 16),
-            Text(_error ?? '', textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.6)),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadAll,
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Retry'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accent,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.wifi_off_rounded, color: AppTheme.accentRed, size: 40),
+          const SizedBox(height: 16),
+          Text(_error ?? '', textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.6)),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _loadSummary,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
-          ],
-        ),
+          ),
+        ]),
       ),
     );
   }
@@ -136,50 +166,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Stat cards
-          isWide
-              ? Row(children: [
-                  Expanded(child: StatCard(
-                    label: 'Steps',
-                    value: s.steps.toString(),
-                    icon: Icons.directions_walk_rounded,
-                    accentColor: AppTheme.accent,
-                  )),
-                  const SizedBox(width: 16),
-                  Expanded(child: StatCard(
-                    label: 'Standing',
-                    value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
-                    icon: Icons.airline_seat_recline_extra_rounded,
-                    accentColor: AppTheme.accentGreen,
-                  )),
-                  const SizedBox(width: 16),
-                  Expanded(child: PostureDonutChart(percentage: s.postureGoalPercentage)),
-                ])
-              : Column(children: [
-                  StatCard(
-                    label: 'Steps',
-                    value: s.steps.toString(),
-                    icon: Icons.directions_walk_rounded,
-                    accentColor: AppTheme.accent,
-                  ),
-                  const SizedBox(height: 16),
-                  StatCard(
-                    label: 'Standing',
-                    value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
-                    icon: Icons.airline_seat_recline_extra_rounded,
-                    accentColor: AppTheme.accentGreen,
-                  ),
-                  const SizedBox(height: 16),
-                  PostureDonutChart(percentage: s.postureGoalPercentage),
-                ]),
-          const SizedBox(height: 24),
-          RouteMapWidget(points: _route),
-          const SizedBox(height: 32),
-        ],
-      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        isWide
+            ? Row(children: [
+                Expanded(child: StatCard(
+                  label: 'Steps', value: s.steps.toString(),
+                  icon: Icons.directions_walk_rounded, accentColor: AppTheme.accent,
+                )),
+                const SizedBox(width: 16),
+                Expanded(child: StatCard(
+                  label: 'Standing',
+                  value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
+                  icon: Icons.airline_seat_recline_extra_rounded, accentColor: AppTheme.accentGreen,
+                )),
+                const SizedBox(width: 16),
+                Expanded(child: PostureDonutChart(percentage: s.postureGoalPercentage)),
+              ])
+            : Column(children: [
+                StatCard(
+                  label: 'Steps', value: s.steps.toString(),
+                  icon: Icons.directions_walk_rounded, accentColor: AppTheme.accent,
+                ),
+                const SizedBox(height: 16),
+                StatCard(
+                  label: 'Standing',
+                  value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
+                  icon: Icons.airline_seat_recline_extra_rounded, accentColor: AppTheme.accentGreen,
+                ),
+                const SizedBox(height: 16),
+                PostureDonutChart(percentage: s.postureGoalPercentage),
+              ]),
+        const SizedBox(height: 24),
+        RouteMapWidget(httpPoints: _httpRoute, livePoints: _livePoints),
+        const SizedBox(height: 32),
+      ]),
     );
+  }
+}
+
+class _GpsSourceIndicator extends StatelessWidget {
+  final GpsSource source;
+  const _GpsSourceIndicator(this.source);
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color, icon) = switch (source) {
+      GpsSource.bluetooth => ('BLE', AppTheme.accentBlue, Icons.bluetooth),
+      GpsSource.phone     => ('Phone GPS', AppTheme.accent, Icons.gps_fixed),
+      GpsSource.http      => ('HTTP', AppTheme.accentGreen, Icons.wifi),
+    };
+    return Row(children: [
+      Icon(icon, color: color, size: 14),
+      const SizedBox(width: 4),
+      Text(label, style: TextStyle(fontSize: 11, color: color)),
+      const SizedBox(width: 12),
+    ]);
   }
 }
