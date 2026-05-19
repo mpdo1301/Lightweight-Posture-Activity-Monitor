@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
+import '../services/ble_service.dart'
+    if (dart.library.html) '../services/stub_ble_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/stat_card.dart';
@@ -23,39 +26,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   final LocationService _locationService = LocationService();
   final List<LocationPoint> _livePoints = [];
-
-  // Hardcoded fallback for mobile while BLE activity isn't wired yet
-  static final _mobileMockSummary = ActivitySummary(
-    steps: 8432,
-    standingMinutes: 214,
-    postureGoalPercentage: 68.5,
-  );
+  StreamSubscription? _bleSub;
 
   @override
   void initState() {
     super.initState();
-    _loadSummary();
 
-    if (!kIsWeb) {
+    if (kIsWeb) {
+      _loadWebData();
+    } else {
+      _loading = false;
       _locationService.start();
-      _locationService.stream.listen((point) {
+      _locationService.locationStream.listen((point) {
         setState(() => _livePoints.add(point));
+      });
+      _bleSub = BleService.stream.listen((payload) {
+        setState(() {
+          _summary = ActivitySummary(
+            steps: payload.steps,
+            standingMinutes: payload.activeMinutes,
+            postureGoalPercentage: payload.postureGoalPercentage,
+          );
+        });
       });
     }
   }
 
-  Future<void> _loadSummary() async {
+  Future<void> _loadWebData() async {
     setState(() { _loading = true; _error = null; });
-
-    if (!kIsWeb) {
-      // Mobile: use hardcoded data until BLE activity characteristic is wired up
-      setState(() {
-        _summary = _mobileMockSummary;
-        _loading = false;
-      });
-      return;
-    }
-
     try {
       final results = await Future.wait([
         ApiService.getActivitySummary(),
@@ -76,6 +74,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _bleSub?.cancel();
     _locationService.dispose();
     super.dispose();
   }
@@ -91,7 +90,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
               : _error != null
                   ? _buildError()
-                  : _buildDashboard(),
+                  : _summary == null
+                      ? const Center(child: Text('Waiting for Pi...', style: TextStyle(color: AppTheme.textSecondary)))
+                      : _buildDashboard(),
         ),
       ]),
     );
@@ -118,12 +119,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const Spacer(),
         if (!kIsWeb && _livePoints.isNotEmpty)
           _GpsSourceIndicator(_livePoints.last.source),
-        IconButton(
-          icon: const Icon(Icons.refresh_rounded, size: 18),
-          color: AppTheme.textSecondary,
-          tooltip: 'Refresh',
-          onPressed: _loadSummary,
-        ),
+        if (kIsWeb)
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            color: AppTheme.textSecondary,
+            tooltip: 'Refresh',
+            onPressed: _loadWebData,
+          ),
       ]),
     );
   }
@@ -146,7 +148,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.6)),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: _loadSummary,
+            onPressed: _loadWebData,
             icon: const Icon(Icons.refresh_rounded, size: 16),
             label: const Text('Retry'),
             style: ElevatedButton.styleFrom(
@@ -175,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 )),
                 const SizedBox(width: 16),
                 Expanded(child: StatCard(
-                  label: 'Standing',
+                  label: 'Active',
                   value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
                   icon: Icons.airline_seat_recline_extra_rounded, accentColor: AppTheme.accentGreen,
                 )),
@@ -189,7 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 16),
                 StatCard(
-                  label: 'Standing',
+                  label: 'Active',
                   value: '${s.standingMinutes ~/ 60}h ${s.standingMinutes % 60}m',
                   icon: Icons.airline_seat_recline_extra_rounded, accentColor: AppTheme.accentGreen,
                 ),
