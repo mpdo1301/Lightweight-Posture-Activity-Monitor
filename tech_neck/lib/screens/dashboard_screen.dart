@@ -31,26 +31,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-
     if (kIsWeb) {
       _loadWebData();
     } else {
+      _initMobile();
+    }
+  }
+
+  Future<void> _initMobile() async {
+    setState(() {
       _summary = ActivitySummary(steps: 0, standingMinutes: 0, postureGoalPercentage: 0);
       _loading = false;
-      _locationService.start();
-      _locationService.locationStream.listen((point) {
-        setState(() => _livePoints.add(point));
+    });
+
+    _bleSub = BleService.stream.listen((payload) {
+      setState(() {
+        _summary = ActivitySummary(
+          steps: payload.steps,
+          standingMinutes: payload.activeMinutes,
+          postureGoalPercentage: payload.postureGoalPercentage,
+        );
       });
-      _bleSub = BleService.stream.listen((payload) {
-        setState(() {
-          _summary = ActivitySummary(
-            steps: payload.steps,
-            standingMinutes: payload.activeMinutes,
-            postureGoalPercentage: payload.postureGoalPercentage,
-          );
-        });
-      });
-    }
+    });
+
+    _locationService.locationStream.listen((point) {
+      setState(() => _livePoints.add(point));
+    });
+
+    await _locationService.start();
   }
 
   Future<void> _loadWebData() async {
@@ -113,7 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: const Icon(Icons.show_chart, color: Colors.black, size: 16),
         ),
         const SizedBox(width: 12),
-        const Text('Tech Neck', style: TextStyle(
+        const Text('PI TRACKER', style: TextStyle(
           fontSize: 15, fontWeight: FontWeight.w700,
           color: AppTheme.textPrimary, letterSpacing: 2,
         )),
